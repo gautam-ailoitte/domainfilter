@@ -6,6 +6,7 @@
 #include <netinet/udp.h>
 #include <arpa/inet.h>
 #include <android/log.h>
+#include "include/domainfilter.h"
 
 #define TAG "DomainExtract"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -241,8 +242,8 @@ static int extract_tls_sni(const uint8_t *tls_data, size_t tls_len, char *domain
     return 0;
 }
 
-// Main domain extraction function
-int extract_domain(const void *packet, size_t len, char *domain, size_t domain_size) {
+// Main domain extraction function - exported
+int extract_domain_from_packet(const void *packet, size_t len, char *domain, size_t domain_size) {
     if (len < sizeof(struct iphdr)) {
         return 0;
     }
@@ -272,7 +273,7 @@ int extract_domain(const void *packet, size_t len, char *domain, size_t domain_s
             return extract_dns_domain(dns_data, dns_len, domain, domain_size);
         }
     }
-    // HTTP/HTTPS (TCP port 80/443)
+        // HTTP/HTTPS (TCP port 80/443)
     else if (ip->protocol == IPPROTO_TCP) {
         if (len < ip_header_len + sizeof(struct tcphdr)) {
             return 0;
@@ -292,7 +293,7 @@ int extract_domain(const void *packet, size_t len, char *domain, size_t domain_s
         if (ntohs(tcp->dest) == 80) {
             return extract_http_host(payload, payload_len, domain, domain_size);
         }
-        // HTTPS (port 443)
+            // HTTPS (port 443)
         else if (ntohs(tcp->dest) == 443) {
             return extract_tls_sni(payload, payload_len, domain, domain_size);
         }

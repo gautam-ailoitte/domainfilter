@@ -1,13 +1,14 @@
 package com.example.domainfilter
 
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.Handler
@@ -23,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class FilterVpnService : VpnService() {
     companion object {
-        private const val TAG = "FilterVpnService"
+        private const val TAG = "DomainFilter"
 
         // Actions
         const val ACTION_CONNECT = "com.example.domainfilter.CONNECT"
@@ -99,7 +100,6 @@ class FilterVpnService : VpnService() {
         super.onDestroy()
     }
 
-    @SuppressLint("ForegroundServiceType")
     private fun startVpn() {
         // If already running, return
         if (sRunning.get()) {
@@ -125,7 +125,6 @@ class FilterVpnService : VpnService() {
             // MTU
             setMtu(1500)
 
-
             // Exclude our app from the VPN
             try {
                 addDisallowedApplication(packageName)
@@ -146,8 +145,16 @@ class FilterVpnService : VpnService() {
             return
         }
 
-        // Start a foreground notification
-        startForeground(NOTIFICATION_ID, buildNotification())
+        // Start a foreground notification with the correct service type
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
 
         // Set running flag
         sRunning.set(true)

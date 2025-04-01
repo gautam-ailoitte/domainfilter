@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <android/log.h>
+#include <ctype.h> // Added this header for isdigit()
 
 #define TAG "DomainFilter"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -304,7 +305,6 @@ int filter_check_domain(const char *domain) {
 
             // Check if wildcard matches from this part forward
             node = filter_trie;
-            int wildcard_match = 1;
 
             for (size_t j = i + 1; j < pos && node != NULL; j++) {
                 unsigned char c = reversed[j];

@@ -25,6 +25,11 @@ class FilterManager(context: Context) {
             "tracking",    // Tracking domains
             "malware"      // Known malware domains
         )
+
+        // Load native library
+        init {
+            System.loadLibrary("domainfilter")
+        }
     }
 
     // JNI methods for domain filtering

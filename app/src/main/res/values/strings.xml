@@ -36,4 +36,11 @@
     <string name="notification_channel_name">Domain Filter VPN</string>
     <string name="notification_channel_description">Shows when Domain Filter VPN is active</string>
     <string name="notification_active">Domain Filter active: %d domains blocked</string>
+
+    <!-- Navigation strings (missing ones that caused errors) -->
+    <string name="next">Next</string>
+    <string name="previous">Previous</string>
+    <string name="first_fragment_label">First Fragment</string>
+    <string name="second_fragment_label">Second Fragment</string>
+    <string name="lorem_ipsum">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</string>
 </resources>

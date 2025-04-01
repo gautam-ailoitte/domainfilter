@@ -12,6 +12,7 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <arpa/inet.h>
+#include "include/domainfilter.h"
 
 #define TAG "DomainFilter"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -19,11 +20,11 @@
 
 // Global variables
 static int vpn_fd = -1;
-static pthread_t worker_thread;
 static int running = 0;
 static JNIEnv *jni_env = NULL;
 static jobject vpn_service = NULL;
 static jmethodID protect_socket_method = NULL;
+static int filtered_count = 0;
 
 // Connection tracking structure
 typedef struct {
@@ -53,8 +54,6 @@ static pthread_mutex_t conn_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int process_packet(const void *packet, size_t len);
 static int handle_outgoing_packet(const void *packet, size_t len);
 static int handle_incoming_data();
-static int extract_domain(const void *packet, size_t len, char *domain, size_t domain_size);
-static int is_domain_blocked(const char *domain);
 static connection_t *find_or_create_connection(const void *packet, size_t len);
 static void cleanup_connections();
 static uint64_t get_time_ms();
@@ -62,97 +61,104 @@ static uint64_t get_time_ms();
 // JNI function to initialize the module
 JNIEXPORT void JNICALL
 Java_com_example_domainfilter_FilterVpnService_jniInit(JNIEnv *env, jobject thiz) {
-LOGI("Initializing native module");
+    LOGI("Initializing native module");
 
-// Save JNI environment and VPN service object
-jni_env = env;
-vpn_service = (*env)->NewGlobalRef(env, thiz);
+    // Save JNI environment and VPN service object
+    jni_env = env;
+    vpn_service = (*env)->NewGlobalRef(env, thiz);
 
-// Get method ID for protectSocket
-jclass vpn_class = (*env)->GetObjectClass(env, vpn_service);
-protect_socket_method = (*env)->GetMethodID(env, vpn_class, "protectSocket", "(I)V");
+    // Get method ID for protectSocket
+    jclass vpn_class = (*env)->GetObjectClass(env, vpn_service);
+    protect_socket_method = (*env)->GetMethodID(env, vpn_class, "protectSocket", "(I)V");
 
-if (protect_socket_method == NULL) {
-LOGE("Failed to get protectSocket method");
-return;
-}
+    if (protect_socket_method == NULL) {
+        LOGE("Failed to get protectSocket method");
+        return;
+    }
 
-LOGI("Native module initialized");
+    LOGI("Native module initialized");
 }
 
 // JNI function to start packet processing
 JNIEXPORT void JNICALL
 Java_com_example_domainfilter_FilterVpnService_jniStart(JNIEnv *env, jobject thiz, jint fd) {
-if (running) {
-LOGI("Already running, ignoring start request");
-return;
-}
+    if (running) {
+        LOGI("Already running, ignoring start request");
+        return;
+    }
 
-LOGI("Starting native packet processing with fd: %d", fd);
-vpn_fd = fd;
-running = 1;
+    LOGI("Starting native packet processing with fd: %d", fd);
+    vpn_fd = fd;
+    running = 1;
+    filtered_count = 0;
 
-// Make socket non-blocking
-int flags = fcntl(vpn_fd, F_GETFL, 0);
-fcntl(vpn_fd, F_SETFL, flags | O_NONBLOCK);
+    // Make socket non-blocking
+    int flags = fcntl(vpn_fd, F_GETFL, 0);
+    fcntl(vpn_fd, F_SETFL, flags | O_NONBLOCK);
 
-// Initialize connection tracking
-memset(connections, 0, sizeof(connections));
-num_connections = 0;
+    // Initialize connection tracking
+    memset(connections, 0, sizeof(connections));
+    num_connections = 0;
 
-// Main processing loop (on this thread)
-unsigned char buffer[4096];
+    // Main processing loop (on this thread)
+    unsigned char buffer[4096];
 
-while (running) {
-// Process outgoing packets (from apps to VPN)
-ssize_t length = read(vpn_fd, buffer, sizeof(buffer));
-if (length > 0) {
-process_packet(buffer, length);
-} else if (length < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-LOGE("Error reading from VPN interface: %s", strerror(errno));
-}
+    while (running) {
+        // Process outgoing packets (from apps to VPN)
+        ssize_t length = read(vpn_fd, buffer, sizeof(buffer));
+        if (length > 0) {
+            process_packet(buffer, length);
+        } else if (length < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            LOGE("Error reading from VPN interface: %s", strerror(errno));
+        }
 
-// Process incoming packets (from network to apps)
-handle_incoming_data();
+        // Process incoming packets (from network to apps)
+        handle_incoming_data();
 
-// Cleanup idle connections periodically
-static uint64_t last_cleanup = 0;
-uint64_t now = get_time_ms();
-if (now - last_cleanup > 10000) { // Every 10 seconds
-cleanup_connections();
-last_cleanup = now;
-}
+        // Cleanup idle connections periodically
+        static uint64_t last_cleanup = 0;
+        uint64_t now = get_time_ms();
+        if (now - last_cleanup > 10000) { // Every 10 seconds
+            cleanup_connections();
+            last_cleanup = now;
+        }
 
-// Small sleep to prevent CPU thrashing
-usleep(10000); // 10ms
-}
+        // Small sleep to prevent CPU thrashing
+        usleep(10000); // 10ms
+    }
 
-LOGI("Packet processing loop ended");
+    LOGI("Packet processing loop ended");
 }
 
 // JNI function to stop packet processing
 JNIEXPORT void JNICALL
 Java_com_example_domainfilter_FilterVpnService_jniStop(JNIEnv *env, jobject thiz) {
-LOGI("Stopping native packet processing");
-running = 0;
+    LOGI("Stopping native packet processing");
+    running = 0;
 
-// Cleanup resources
-pthread_mutex_lock(&conn_mutex);
-for (int i = 0; i < num_connections; i++) {
-if (connections[i].socket_fd > 0) {
-close(connections[i].socket_fd);
-connections[i].socket_fd = -1;
-}
-}
-num_connections = 0;
-pthread_mutex_unlock(&conn_mutex);
+    // Cleanup resources
+    pthread_mutex_lock(&conn_mutex);
+    for (int i = 0; i < num_connections; i++) {
+        if (connections[i].socket_fd > 0) {
+            close(connections[i].socket_fd);
+            connections[i].socket_fd = -1;
+        }
+    }
+    num_connections = 0;
+    pthread_mutex_unlock(&conn_mutex);
 
-if (vpn_service != NULL) {
-(*jni_env)->DeleteGlobalRef(jni_env, vpn_service);
-vpn_service = NULL;
+    if (vpn_service != NULL) {
+        (*jni_env)->DeleteGlobalRef(jni_env, vpn_service);
+        vpn_service = NULL;
+    }
+
+    LOGI("Native packet processing stopped");
 }
 
-LOGI("Native packet processing stopped");
+// JNI function to get filtered count
+JNIEXPORT jint JNICALL
+Java_com_example_domainfilter_FilterVpnService_jniGetFilteredCount(JNIEnv *env, jobject thiz) {
+    return filtered_count;
 }
 
 // Main packet processing function
@@ -171,10 +177,11 @@ static int process_packet(const void *packet, size_t len) {
 
     // Extract domain for DNS or HTTP/HTTPS traffic
     char domain[256];
-    if (extract_domain(packet, len, domain, sizeof(domain)) > 0) {
+    if (extract_domain_from_packet(packet, len, domain, sizeof(domain)) > 0) {
         // Check if domain is blocked
-        if (is_domain_blocked(domain)) {
+        if (filter_check_domain(domain)) {
             LOGI("Blocking domain: %s", domain);
+            filtered_count++;
             // Return without forwarding (block)
             return 0;
         }
@@ -397,71 +404,6 @@ static connection_t *find_or_create_connection(const void *packet, size_t len) {
     return NULL; // Too many connections
 }
 
-// Extract domain from packet (DNS, HTTP, TLS)
-// Returns length of domain or 0 if not found
-static int extract_domain(const void *packet, size_t len, char *domain, size_t domain_size) {
-    const struct iphdr *ip = packet;
-
-    // This is a simplified implementation
-    // In reality, you need full protocol parsing for:
-    // 1. DNS queries
-    // 2. HTTP Host headers
-    // 3. TLS SNI from ClientHello
-
-    // For DNS, check if it's a UDP packet to port 53
-    if (ip->protocol == IPPROTO_UDP) {
-        const struct udphdr *udp = (const struct udphdr *)((const char *)ip + (ip->ihl * 4));
-        if (ntohs(udp->dest) == 53) {
-            // Parse DNS query (simplified)
-            // ...
-        }
-    }
-
-        // For HTTP, check if it's a TCP packet to port 80
-    else if (ip->protocol == IPPROTO_TCP) {
-        const struct tcphdr *tcp = (const struct tcphdr *)((const char *)ip + (ip->ihl * 4));
-
-        // HTTP (port 80)
-        if (ntohs(tcp->dest) == 80) {
-            // Parse HTTP Host header (simplified)
-            // ...
-        }
-            // HTTPS (port 443) - Check for TLS ClientHello with SNI
-        else if (ntohs(tcp->dest) == 443) {
-            // Parse TLS SNI (simplified)
-            // ...
-        }
-    }
-
-    return 0; // No domain found
-}
-
-// Check if domain is blocked
-static int is_domain_blocked(const char *domain) {
-    // This is where you'd implement your domain filtering logic
-    // Options include:
-    // 1. Simple string matching against a blocklist
-    // 2. Trie-based matching for efficiency
-    // 3. Regex matching for pattern support
-    // 4. Bloom filter for memory efficiency
-
-    // Example of simple blocking (replace with your logic)
-    static const char *blocked_domains[] = {
-            "ads.example.com",
-            "tracker.example.com",
-            "malware.example.org",
-            NULL
-    };
-
-    for (int i = 0; blocked_domains[i] != NULL; i++) {
-        if (strcmp(domain, blocked_domains[i]) == 0) {
-            return 1; // Blocked
-        }
-    }
-
-    return 0; // Not blocked
-}
-
 // Cleanup inactive connections
 static void cleanup_connections() {
     pthread_mutex_lock(&conn_mutex);
@@ -497,4 +439,40 @@ static uint64_t get_time_ms() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (ts.tv_sec * 1000ULL) + (ts.tv_nsec / 1000000ULL);
+}
+
+// JNI functions for filter manager
+JNIEXPORT void JNICALL
+Java_com_example_domainfilter_util_FilterManager_jniInitFilter(JNIEnv *env, jobject thiz) {
+    filter_init();
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_domainfilter_util_FilterManager_jniAddDomain(JNIEnv *env, jobject thiz, jstring domain) {
+    const char *domain_str = (*env)->GetStringUTFChars(env, domain, NULL);
+    if (domain_str != NULL) {
+        filter_add_domain(domain_str);
+        (*env)->ReleaseStringUTFChars(env, domain, domain_str);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_domainfilter_util_FilterManager_jniLoadFilterFile(JNIEnv *env, jobject thiz, jstring filePath) {
+    const char *file_path = (*env)->GetStringUTFChars(env, filePath, NULL);
+    if (file_path != NULL) {
+        int count = filter_load_file(file_path);
+        LOGI("Loaded %d domains from %s", count, file_path);
+        (*env)->ReleaseStringUTFChars(env, filePath, file_path);
+    }
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_domainfilter_util_FilterManager_jniCheckDomain(JNIEnv *env, jobject thiz, jstring domain) {
+    jboolean result = JNI_FALSE;
+    const char *domain_str = (*env)->GetStringUTFChars(env, domain, NULL);
+    if (domain_str != NULL) {
+        result = filter_check_domain(domain_str) ? JNI_TRUE : JNI_FALSE;
+        (*env)->ReleaseStringUTFChars(env, domain, domain_str);
+    }
+    return result;
 }
