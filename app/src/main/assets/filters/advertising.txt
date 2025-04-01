@@ -1,0 +1,20 @@
+# Sample advertising domains for filtering
+# Format: one domain per line
+
+ad.doubleclick.net
+ads.google.com
+adserver.example.com
+analytics.example.org
+pixel.advertising.com
+tracker.ads.example.net
+metrics.example.io
+ads-api.twitter.com
+pagead2.googlesyndication.com
+ads.facebook.com
+advertising.amazon.com
+ads.tiktok.com
+ads.pinterest.com
+ads.reddit.com
+ads.snapchat.com
+advert.example.com
+example.com

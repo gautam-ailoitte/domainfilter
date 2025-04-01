@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Domain Filter</string>
+
+    <!-- Main Activity -->
+    <string name="status_header">VPN Status</string>
+    <string name="status_running">The Domain Filter VPN is running</string>
+    <string name="status_stopped">The Domain Filter VPN is stopped</string>
+
+    <string name="btn_start_vpn">Start VPN Filter</string>
+    <string name="btn_stop_vpn">Stop VPN Filter</string>
+
+    <string name="stats_header">Statistics</string>
+    <string name="stats_filtered_count">Domains filtered: %d</string>
+
+    <string name="about_header">About Domain Filter</string>
+    <string name="about_description">This application uses VPN technology to filter unwanted domain requests. It runs locally on your device and doesn\'t send your data to any external servers.</string>
+
+    <!-- Toasts -->
+    <string name="toast_vpn_started">Domain filtering started</string>
+    <string name="toast_vpn_stopped">Domain filtering stopped</string>
+    <string name="toast_vpn_permission_denied">VPN permission is required for domain filtering</string>
+
+    <!-- Menu -->
+    <string name="action_settings">Settings</string>
+    <string name="action_filter_lists">Filter Lists</string>
+
+    <!-- VPN Permission -->
+    <string name="vpn_permission_title">VPN Permission Required</string>
+    <string name="vpn_permission_explanation">Domain Filter needs VPN permission to monitor and filter network traffic. This is required to block unwanted domains.\n\nAll filtering happens on your device, and no data is sent to external servers.</string>
+    <string name="btn_grant_permission">Grant Permission</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="vpn_icon_description">VPN icon</string>
+
+    <!-- Notification -->
+    <string name="notification_channel_name">Domain Filter VPN</string>
+    <string name="notification_channel_description">Shows when Domain Filter VPN is active</string>
+    <string name="notification_active">Domain Filter active: %d domains blocked</string>
+</resources>
